@@ -12,10 +12,10 @@ import viewer.PathViewer;
 
 public class PathDrawingSample {
     public static IUIConfiguration conf;
-    public static int bestIntersections = 0;
+    public static int bestIntersections = Integer.MAX_VALUE;
 
     public static void main(String args[]) throws InterruptedException, Exception {
-        int map_id = 3;
+        int map_id = 10;
         conf = Maps.getMap(map_id);
 
         int populationSize = 100;
@@ -35,19 +35,56 @@ public class PathDrawingSample {
 
             population = offspring;
 
-            for (int i = 0; i < population.size(); i++) {
-                List<Point> currentPath = population.get(i);
+            for (List<Point> currentPath : population) {
                 double fitness = fitness(currentPath, conf);
-                if (fitness < bestFitness) {
+                int intersections = calculateIntersections(currentPath, conf);
+
+                if (intersections == 0 && (bestSolution == null || fitness < bestFitness)) {
                     bestFitness = fitness;
                     bestSolution = currentPath;
-                    bestIntersections = calculateIntersections(currentPath, conf);
+                    bestIntersections = intersections;
+                    bestGeneration = generation;
+                } else if (intersections < bestIntersections) {
+                    bestFitness = fitness;
+                    bestSolution = currentPath;
+                    bestIntersections = intersections;
                     bestGeneration = generation;
                 }
             }
 
-            if (bestFitness == 0) {
+            if (bestIntersections == 0) {
                 break;
+            }
+        }
+
+        if(bestIntersections != 0){
+            System.out.println("Encontrar um caminho qualquer que não tenha interseções.");
+            while(bestIntersections != 0){
+                List<Point> path = new ArrayList<>();
+                path.add(new Point(conf.getStart().getX(), conf.getStart().getY()));
+                Random rand = new Random();
+                int size = rand.nextInt(5) + 1;
+                for (int j = 0; j < size; j++) {
+                    Point p;
+                    do {
+                        p = new Point(rand.nextInt(conf.getWidth()), rand.nextInt(conf.getHeight()));
+                    } while (isPointInObstacle(p, conf));
+                    path.add(p);
+                }
+                path.add(new Point(conf.getEnd().getX(), conf.getEnd().getY()));
+                double fitness = fitness(path, conf);
+                int intersections = calculateIntersections(path, conf);
+                if (intersections == 0 && (bestSolution == null || fitness < bestFitness)) {
+                    bestFitness = fitness;
+                    bestSolution = path;
+                    bestIntersections = intersections;
+                    bestGeneration = generations;
+                } else if (intersections < bestIntersections) {
+                    bestFitness = fitness;
+                    bestSolution = path;
+                    bestIntersections = intersections;
+                    bestGeneration = generations;
+                }
             }
         }
 
