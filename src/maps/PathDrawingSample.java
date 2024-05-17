@@ -12,10 +12,11 @@ import viewer.PathViewer;
 
 public class PathDrawingSample {
     public static IUIConfiguration conf;
+    public static int bestIntersections = 0;
 
     public static void main(String args[]) throws InterruptedException, Exception {
 
-        int map_id = 1;
+        int map_id = 9;
 
         conf = Maps.getMap(map_id);
 
@@ -37,10 +38,12 @@ public class PathDrawingSample {
             population = offspring;
 
             for (int i = 0; i < population.size(); i++) {
-                double fitness = fitness(population.get(i), conf);
+                List<Point> currentPath = population.get(i);
+                double fitness = fitness(currentPath, conf);
                 if (fitness < bestFitness) {
                     bestFitness = fitness;
-                    bestSolution = population.get(i);
+                    bestSolution = currentPath;
+                    bestIntersections = calculateIntersections(currentPath, conf);
                 }
             }
 
@@ -51,6 +54,7 @@ public class PathDrawingSample {
 
         if (bestSolution != null) {
             System.out.println("Fitness: " + bestFitness);
+            System.out.println("Intersections: " + bestIntersections);
             PathViewer pv = new PathViewer(conf);
             pv.setFitness(bestFitness);
             pv.setStringPath(bestSolution.toString());
@@ -85,13 +89,26 @@ public class PathDrawingSample {
             path.add(new Point(conf.getStart().getX(), conf.getStart().getY()));
             int size = rand.nextInt(5) + 1;
             for (int j = 0; j < size; j++) {
-                path.add(new Point(rand.nextInt(conf.getWidth()), rand.nextInt(conf.getHeight())));
+                Point p;
+                do {
+                    p = new Point(rand.nextInt(conf.getWidth()), rand.nextInt(conf.getHeight()));
+                } while (isPointInObstacle(p, conf));
+                path.add(p);
             }
 
             path.add(new Point(conf.getEnd().getX(), conf.getEnd().getY()));
             population.add(path);
         }
         return population;
+    }
+
+    public static boolean isPointInObstacle(Point p, IUIConfiguration conf) {
+        for (Rectangle obstacle : conf.getObstacles()) {
+            if (obstacle.contains(p)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static double fitness(List<Point> path, IUIConfiguration conf) {
@@ -110,7 +127,26 @@ public class PathDrawingSample {
                 }
             }
         }
-        return distance + intersections * 1000;
+
+        return distance + intersections * 10000; 
+    }
+
+    public static int calculateIntersections(List<Point> path, IUIConfiguration conf) {
+        int intersections = 0;
+
+        for (int i = 0; i < path.size() - 1; i++) {
+            Point p1 = path.get(i);
+            Point p2 = path.get(i + 1);
+
+            Line2D.Double line = new Line2D.Double(p1, p2);
+            for (Rectangle obstacle : conf.getObstacles()) {
+                if (obstacle.intersectsLine(line)) {
+                    intersections++;
+                }
+            }
+        }
+
+        return intersections;
     }
 
     public static List<List<Point>> select(List<List<Point>> population, List<Double> fitnessValues) {
@@ -153,7 +189,11 @@ public class PathDrawingSample {
         for (List<Point> path : population) {
             if (rand.nextDouble() < mutationRate) {
                 int mutationPoint = rand.nextInt(path.size() - 2) + 1;
-                path.set(mutationPoint, new Point(rand.nextInt(conf.getWidth()), rand.nextInt(conf.getHeight())));
+                Point newPoint;
+                do {
+                    newPoint = new Point(rand.nextInt(conf.getWidth()), rand.nextInt(conf.getHeight()));
+                } while (isPointInObstacle(newPoint, conf));
+                path.set(mutationPoint, newPoint);
             }
         }
     }
