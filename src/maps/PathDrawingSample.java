@@ -15,7 +15,7 @@ public class PathDrawingSample {
     public static int bestIntersections = Integer.MAX_VALUE;
 
     public static void main(String args[]) throws InterruptedException, Exception {
-        int map_id = 10;
+        int map_id = 9;
         conf = Maps.getMap(map_id);
 
         int populationSize = 100;
