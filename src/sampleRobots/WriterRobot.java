@@ -4,35 +4,29 @@ import robocode.*;
 import robocode.util.Utils;
 
 import java.awt.geom.*;
-import java.awt.*;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.util.HashMap;
 
 public class WriterRobot extends AdvancedRobot {
 
-    /**
-     * Classe usada para guardar os dados dos robots inimigos, quando observados
-     */
     private class Dados {
         String nome;
         Double distancia;
         Double velocidade;
+        Double energia;
 
-        public Dados(String nome, Double distancia, Double velocidade) {
+        public Dados(String nome, Double distancia, Double velocidade, Double energia) {
             this.nome = nome;
             this.distancia = distancia;
             this.velocidade = velocidade;
+            this.energia = energia;
         }
     }
 
-    RobocodeFileOutputStream fw;
-
-    //estrutura para manter a informação das balas enquanto não atingem um alvo, a parede ou outra bala 
-    //isto porque enquanto a bala não desaparece, não sabemos se atingiu o alvo ou não
     HashMap<Bullet, Dados> balasNoAr = new HashMap<>();
 
     private int totalTiros = 0;
-    private int tirosAcertados = 0;
 
     private Rectangle2D.Double battlefield;
     private static final int GRID_SIZE = 8;
@@ -42,6 +36,11 @@ public class WriterRobot extends AdvancedRobot {
     private int currentRow = 0;
     private int currentCol = 0;
 
+    private int[][] gridCounts = new int[GRID_SIZE][GRID_SIZE];
+
+    RobocodeFileOutputStream fw;
+    public PrintStream out;
+
     @Override
     public void run() {
 
@@ -50,8 +49,9 @@ public class WriterRobot extends AdvancedRobot {
         squareHeight = battlefield.height / GRID_SIZE;
 
         try {
-            fw = new RobocodeFileOutputStream(this.getDataFile("log_robocode.txt").getAbsolutePath(), true);
-            System.out.println("Writing to: " + fw.getName());
+            RobocodeFileOutputStream fw = new RobocodeFileOutputStream(
+                    this.getDataFile("dataset.csv").getAbsolutePath(), true);
+            out.println("Writing to: " + fw.getName());
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -97,66 +97,111 @@ public class WriterRobot extends AdvancedRobot {
 
     @Override
     public void onScannedRobot(ScannedRobotEvent event) {
-        Point2D.Double coordinates = utils.Utils.getEnemyCoordinates(this, event.getBearing(), event.getDistance());
-        Bullet b = fireBullet(3);
+        super.onScannedRobot(event);
+        System.out.println("Enemy spotted: "+event.getName());
 
+        Point2D.Double coordinates = getEnemyCoordinates(event.getBearing(), event.getDistance());
+
+        int gridX = (int) ((coordinates.x - battlefield.x) / squareWidth);
+        int gridY = (int) ((coordinates.y - battlefield.y) / squareHeight);
+        if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
+            gridCounts[gridY][gridX] = Math.min(2, gridCounts[gridY][gridX] + 1);
+        }
+
+        Bullet b = fireBullet(3);
         if (b != null) {
-            balasNoAr.put(b, new Dados(event.getName(), event.getDistance(), event.getVelocity()));
+            balasNoAr.put(b, new Dados(event.getName(), event.getDistance(), event.getVelocity(), event.getEnergy()));
             totalTiros++;
         }
     }
 
     @Override
     public void onBulletHit(BulletHitEvent event) {
-        Dados d = balasNoAr.get(event.getBullet());
-        try {
-            if (event.getName().equals(event.getBullet().getVictim())) {
-                tirosAcertados++;
-                fw.write((d.nome + "," + d.distancia + "," + d.velocidade + ",hit\n").getBytes());
-            } else {
-                fw.write((d.nome + "," + d.distancia + "," + d.velocidade + ",no_hit\n").getBytes());
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
         balasNoAr.remove(event.getBullet());
+        atualizarMatriz();
+        guardarMatriz();
     }
 
     @Override
     public void onBulletMissed(BulletMissedEvent event) {
-        Dados d = balasNoAr.get(event.getBullet());
-        try {
-            fw.write((d.nome + "," + d.distancia + "," + d.velocidade + ",no_hit\n").getBytes());
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
         balasNoAr.remove(event.getBullet());
+        atualizarMatriz();
+        guardarMatriz();
     }
 
-    @Override
-    public void onBulletHitBullet(BulletHitBulletEvent event) {
-        Dados d = balasNoAr.get(event.getBullet());
-        try {
-            fw.write((d.nome + "," + d.distancia + "," + d.velocidade + ",no_hit\n").getBytes());
-        } catch (IOException e) {
-            e.printStackTrace();
+    private Point2D.Double getEnemyCoordinates(double bearing, double distance) {
+        double angle = Math.toRadians((getHeading() + bearing) % 360);
+        double enemyX = (getX() + Math.sin(angle) * distance);
+        double enemyY = (getY() + Math.cos(angle) * distance);
+        return new Point2D.Double(enemyX, enemyY);
+    }
+
+    private void atualizarMatriz() {
+        // Limpa a matriz antes de atualizar
+        for (int i = 0; i < GRID_SIZE; i++) {
+            for (int j = 0; j < GRID_SIZE; j++) {
+                gridCounts[i][j] = 0;
+            }
         }
-        balasNoAr.remove(event.getBullet());
+
+        // Atualiza a posição do robô principal
+        int gridX = (int) ((getX() - battlefield.x) / squareWidth);
+        int gridY = (int) ((getY() - battlefield.y) / squareHeight);
+        if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
+            gridCounts[gridY][gridX] = 'X';
+        }
+
+        // Atualiza a matriz com as balas
+        for (Bullet b : balasNoAr.keySet()) {
+            int bulletX = (int) ((b.getX() - battlefield.x) / squareWidth);
+            int bulletY = (int) ((b.getY() - battlefield.y) / squareHeight);
+            if (bulletX >= 0 && bulletX < GRID_SIZE && bulletY >= 0 && bulletY < GRID_SIZE) {
+                gridCounts[bulletY][bulletX] = -1;
+            }
+        }
+    }
+
+    private synchronized void guardarMatriz() {
+        if (fw != null) {
+            try {
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < GRID_SIZE; i++) {
+                    for (int j = 0; j < GRID_SIZE; j++) {
+                        sb.append(gridCounts[i][j]);
+                        if (j < GRID_SIZE - 1) {
+                            sb.append(",");
+                        }
+                    }
+                }
+                sb.append("\n");
+
+                fw.write(sb.toString().getBytes());
+                fw.flush();
+
+                fw.close();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     @Override
     public void onDeath(DeathEvent event) {
-        finalizarEscrita();
+        fecharArquivo();
     }
 
     @Override
-    public void onRoundEnded(RoundEndedEvent event) {
-        finalizarEscrita();
+    public void onWin(WinEvent event) {
+        fecharArquivo();
     }
 
-    private void finalizarEscrita() {
+    @Override
+    public void onBattleEnded(BattleEndedEvent event) {
+        fecharArquivo();
+    }
+
+    private void fecharArquivo() {
         try {
-            fw.write(("Total tiros: " + totalTiros + ", Tiros acertados: " + tirosAcertados + "\n").getBytes());
             fw.close();
         } catch (IOException e) {
             e.printStackTrace();
