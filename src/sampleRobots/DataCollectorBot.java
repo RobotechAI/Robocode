@@ -6,6 +6,8 @@ import robocode.util.Utils;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -18,13 +20,17 @@ public class DataCollectorBot extends AdvancedRobot {
     private double squareHeight;
     private int currentRow = 0;
     private int currentCol = 0;
+    private Set<String> enemyPositions = new HashSet<>();
+    private Set<String> currentEnemyPositions = new HashSet<>();
+    private String lastEnemyPosition = null;
+    private final Object lock = new Object();
 
     /**
      * run: DataCollectorBot's default behavior
      */
     public void run() {
 
-        battlefield = new Rectangle2D.Double(0,0, getBattleFieldWidth() - 36, getBattleFieldHeight() - 36);
+        battlefield = new Rectangle2D.Double(0, 0, getBattleFieldWidth() - 36, getBattleFieldHeight() - 36);
         squareWidth = battlefield.width / grid;
         squareHeight = battlefield.height / grid;
 
@@ -34,7 +40,10 @@ public class DataCollectorBot extends AdvancedRobot {
         // Create a TimerTask to update the matrix and save to CSV every 2 seconds
         TimerTask task = new TimerTask() {
             public void run() {
-                updateAndSaveDataMatrix();
+                synchronized (lock) {
+                    updateAndSaveDataMatrix();
+                }
+                cleanOldEnemyPositions(); // Limpar posições antigas antes de salvar
             }
         };
 
@@ -46,7 +55,9 @@ public class DataCollectorBot extends AdvancedRobot {
         while (true) {
             turnGunRight(90);
             turnGunRight(90);
-            moverParaProximaPosicao();
+            synchronized (lock) {
+                moverParaProximaPosicao();
+            }
             execute();
         }
     }
@@ -60,33 +71,23 @@ public class DataCollectorBot extends AdvancedRobot {
     }
 
     private void moverParaProximaPosicao() {
-        int prevRow = currentRow;
-        int prevCol = currentCol;
-    
+        // Atualizar a posição anterior do robô para 0 na matriz de dados
+        if (!data[currentRow][currentCol].equals(1) || data[currentRow][currentCol].equals("X")) {
+            data[currentRow][currentCol] = 0;
+        }
+
         double x = battlefield.x + currentCol * squareWidth + squareWidth / 2;
         double y = battlefield.y + currentRow * squareHeight + squareHeight / 2;
         goTo(x, y);
-    
+
         // Calculate new row and column
-        int newRow = (int)((battlefield.height - (getY() - battlefield.y)) / squareHeight);
-        int newCol = (int)((getX() - battlefield.x) / squareWidth);
-    
+        int newRow = (int) ((battlefield.height - (getY() - battlefield.y)) / squareHeight);
+        int newCol = (int) ((getX() - battlefield.x) / squareWidth);
+
         // Ensure indices are within bounds
-        if (newRow < 0) newRow = 0;
-        if (newRow >= grid) newRow = grid - 1;
-        if (newCol < 0) newCol = 0;
-        if (newCol >= grid) newCol = grid - 1;
-    
-        // Reset the previous position if it was marked as "X"
-        if (data[prevRow][prevCol] instanceof String && data[prevRow][prevCol].equals("X")) {
-            data[prevRow][prevCol] = 0;
-        }
-    
-        // Mark the new position of the robot if it's not already marked
-        if (!(data[newRow][newCol] instanceof String)) {
-            data[newRow][newCol] = "X";
-        }
-    
+        newRow = Math.max(0, Math.min(newRow, grid - 1));
+        newCol = Math.max(0, Math.min(newCol, grid - 1));
+
         // Update current row and column
         currentRow = newRow;
         currentCol = newCol;
@@ -118,41 +119,57 @@ public class DataCollectorBot extends AdvancedRobot {
         double angle = Math.toRadians(getHeading() + e.getBearing());
         double scannedX = getX() + e.getDistance() * Math.sin(angle);
         double scannedY = getY() + e.getDistance() * Math.cos(angle);
-    
+
         // Calculate the matrix indices
-        int row = (int)((battlefield.height - (scannedY - battlefield.y)) / squareHeight);
-        int col = (int)((scannedX - battlefield.x) / squareWidth);
-    
+        int row = (int) ((battlefield.height - (scannedY - battlefield.y)) / squareHeight);
+        int col = (int) ((scannedX - battlefield.x) / squareWidth);
+
         // Ensure indices are within bounds
-        if (row < 0) row = 0;
-        if (row >= grid) row = grid - 1;
-        if (col < 0) col = 0;
-        if (col >= grid) col = grid - 1;
-    
-        // Update the matrix only if there is no robot already registered in that square
-        if (!(data[row][col] instanceof String)) {
-            if (data[row][col] instanceof Integer) {
-                data[row][col] = (Integer)data[row][col] + 1;
-            } else {
-                data[row][col] = 1;
-            }
+        if (row < 0)
+            row = 0;
+        if (row >= grid)
+            row = grid - 1;
+        if (col < 0)
+            col = 0;
+        if (col >= grid)
+            col = grid - 1;
+
+        // Limpar a última posição do inimigo, se houver
+        if (lastEnemyPosition != null) {
+            String[] parts = lastEnemyPosition.split(",");
+            int lastRow = Integer.parseInt(parts[0]);
+            int lastCol = Integer.parseInt(parts[1]);
+            data[lastRow][lastCol] = 0;
         }
-    
+
+        // Marcar a presença de um bot inimigo na matriz de dados
+        data[row][col] = 1;
+
+        // Atualizar a última posição do inimigo
+        lastEnemyPosition = row + "," + col;
+
         fire(1);
     }
 
-    /**
-     * onHitByBullet: What to do when you're hit by a bullet
-     */
-    public void onHitByBullet(HitByBulletEvent e) {
-        double x = getX();
-        double y = getY();
-        int row = (int)((y - battlefield.y) / squareHeight);
-        int col = (int)((x - battlefield.x) / squareWidth);
+    private void cleanOldEnemyPositions() {
+        // Criar um novo conjunto para armazenar as posições atuais dos inimigos
+        Set<String> newEnemyPositions = new HashSet<>(currentEnemyPositions);
 
-        data[row][col] = -1; // Mark the position with -1 when hit by a bullet
+        // Limpar posições antigas na matriz de dados
+        for (String pos : enemyPositions) {
+            if (!currentEnemyPositions.contains(pos)) {
+                String[] parts = pos.split(",");
+                int row = Integer.parseInt(parts[0]);
+                int col = Integer.parseInt(parts[1]);
+                data[row][col] = 0;
+            }
+        }
 
-        back(10);
+        // Atualizar o conjunto de posições de inimigos
+        enemyPositions = newEnemyPositions;
+
+        // Limpar o conjunto de posições de inimigos detectados na atual iteração
+        currentEnemyPositions.clear();
     }
 
     /**
@@ -160,6 +177,22 @@ public class DataCollectorBot extends AdvancedRobot {
      */
     public void onHitWall(HitWallEvent e) {
         back(20);
+    }
+
+    /**
+     * onHitRobot: What to do when you collide with another robot
+     */
+    public void onHitRobot(HitRobotEvent e) {
+        // If the other robot is in front of us, move back a bit and turn right
+        if (e.getBearing() > -90 && e.getBearing() <= 90) {
+            back(100);
+            turnRight(90);
+        }
+        // If the other robot is behind us, move forward a bit and turn right
+        else {
+            ahead(100);
+            turnRight(90);
+        }
     }
 
     private void saveDataMatrixToCSV(String filename) {
@@ -196,22 +229,9 @@ public class DataCollectorBot extends AdvancedRobot {
     }
 
     private void updateAndSaveDataMatrix() {
-        updateMatrixValues();
-        saveDataMatrixToCSV("battlefield_data.csv");
-    }
-
-    private void updateMatrixValues() {
-        for (int i = 0; i < grid; i++) {
-            for (int j = 0; j < grid; j++) {
-                // Check if the square is empty and update the value
-                if (!(data[i][j] instanceof String) && !(data[i][j] instanceof Integer)) {
-                    data[i][j] = 0;
-                }
-                // Update the value to -1 if there are no more bullets in the square
-                if (data[i][j] instanceof Integer && (Integer)data[i][j] == -1) {
-                    data[i][j] = 0;
-                }
-            }
+        synchronized (lock) {
+            data[currentRow][currentCol] = "X";
+            saveDataMatrixToCSV("battlefield_data.csv");
         }
     }
 }
