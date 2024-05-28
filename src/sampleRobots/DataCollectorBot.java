@@ -6,30 +6,34 @@ import robocode.util.Utils;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 
 public class DataCollectorBot extends AdvancedRobot {
-
     public int grid = 8;
-    public Object[][] data = new Object[grid][grid];
-    private Rectangle2D.Double battlefield;
-    private double squareWidth;
-    private double squareHeight;
     private int currentRow = 0;
     private int currentCol = 0;
-    private Set<String> enemyPositions = new HashSet<>();
-    private Set<String> currentEnemyPositions = new HashSet<>();
-    private String lastEnemyPosition = null;
+
     private final Object lock = new Object();
+    public Object[][] data = new Object[grid][grid];
+
+    private Rectangle2D.Double battlefield;
+
+    private double squareWidth;
+    private double squareHeight;
+
+    private Map<String, String> enemyPositions = new HashMap<>();
+    private Map<String, String> currentEnemyPositions = new HashMap<>();
 
     /**
      * run: DataCollectorBot's default behavior
      */
     public void run() {
-
+        setAdjustRadarForRobotTurn(true);
         battlefield = new Rectangle2D.Double(0, 0, getBattleFieldWidth() - 36, getBattleFieldHeight() - 36);
         squareWidth = battlefield.width / grid;
         squareHeight = battlefield.height / grid;
@@ -37,7 +41,7 @@ public class DataCollectorBot extends AdvancedRobot {
         // Initialize the data matrix
         initializeDataMatrix();
 
-        // Create a TimerTask to update the matrix and save to CSV every 2 seconds
+        // Create a TimerTask to update the matrix and save to CSV every second
         TimerTask task = new TimerTask() {
             public void run() {
                 synchronized (lock) {
@@ -53,8 +57,7 @@ public class DataCollectorBot extends AdvancedRobot {
 
         // Robot main loop
         while (true) {
-            turnGunRight(90);
-            turnGunRight(90);
+            turnRadarRight(360);
             synchronized (lock) {
                 moverParaProximaPosicao();
             }
@@ -134,9 +137,9 @@ public class DataCollectorBot extends AdvancedRobot {
         if (col >= grid)
             col = grid - 1;
 
-        // Limpar a última posição do inimigo, se houver
-        if (lastEnemyPosition != null) {
-            String[] parts = lastEnemyPosition.split(",");
+        // Adicionar a posição do inimigo ao conjunto de posições de inimigos detectados na atual iteração
+        if (enemyPositions.containsKey(e.getName())) {
+            String[] parts = enemyPositions.get(e.getName()).split(",");
             int lastRow = Integer.parseInt(parts[0]);
             int lastCol = Integer.parseInt(parts[1]);
             data[lastRow][lastCol] = 0;
@@ -145,23 +148,25 @@ public class DataCollectorBot extends AdvancedRobot {
         // Marcar a presença de um bot inimigo na matriz de dados
         data[row][col] = 1;
 
-        // Atualizar a última posição do inimigo
-        lastEnemyPosition = row + "," + col;
+        // Adicionar a posição do inimigo ao conjunto de posições de inimigos detectados
+        enemyPositions.put(e.getName(), row + "," + col);
 
         fire(1);
     }
 
     private void cleanOldEnemyPositions() {
         // Criar um novo conjunto para armazenar as posições atuais dos inimigos
-        Set<String> newEnemyPositions = new HashSet<>(currentEnemyPositions);
+        Map<String, String> newEnemyPositions = new HashMap<>();
 
-        // Limpar posições antigas na matriz de dados
-        for (String pos : enemyPositions) {
-            if (!currentEnemyPositions.contains(pos)) {
-                String[] parts = pos.split(",");
+        // Adicionar as posições atuais dos inimigos detectados na atual iteração
+        for (String enemy : enemyPositions.keySet()) {
+            if (!currentEnemyPositions.containsKey(enemy)) {
+                String[] parts = enemyPositions.get(enemy).split(",");
                 int row = Integer.parseInt(parts[0]);
                 int col = Integer.parseInt(parts[1]);
                 data[row][col] = 0;
+            } else {
+                newEnemyPositions.put(enemy, enemyPositions.get(enemy));
             }
         }
 
