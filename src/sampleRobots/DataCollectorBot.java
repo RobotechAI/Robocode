@@ -1,4 +1,4 @@
-package example;
+package sampleRobots;
 
 import robocode.*;
 import java.awt.geom.Rectangle2D;
